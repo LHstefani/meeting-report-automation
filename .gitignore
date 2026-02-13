@@ -1,0 +1,9 @@
+input/
+output/
+*.docx
+__pycache__/
+.env
+.streamlit/secrets.toml
+
+# Ignore transcript files but not requirements.txt
+*.transcript.txt
