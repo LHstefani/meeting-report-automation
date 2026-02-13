@@ -46,6 +46,7 @@ def get_api_key():
     except (KeyError, FileNotFoundError):
         pass
 
+    # Only show sidebar input if secrets aren't configured (local dev)
     with st.sidebar:
         st.markdown("### API Configuration")
         key = st.text_input(
@@ -53,7 +54,7 @@ def get_api_key():
             type="password",
             help="Required for AI analysis. Get one at console.anthropic.com",
         )
-    return key if key else None
+        return key if key else None
 
 
 # ---------------------------------------------------------------------------
