@@ -1,0 +1,27 @@
+Report automation tool - update proposal
+
+Context:
+Immo-Pro has a standard MoM or PV meeting report template that is always used in the company. I'll share the template for you to analyze. The thing is most of the time several PMs take out some sections or columns and or rename some sections depending on their project but the overall structure remains the same and the same principles are applied. The report automation tool has as main purpose to permit the PM to have a report proposal to review and finalize based on .txt file and the previous report. This means the tool needs to analyze the word document correctly and parse the .txt file which can contain any type of content from the meeting itself.
+
+One seperate event is when the first report needs to be created. The standard template then needs to be proposed depending on the sections or main (MAJOR) topics that you can identify. You will see in the examples which kind of sections we generally have. Do not deviate from those sections, if you want we can fix the types of sections in a list. This happens often as some random meetings happen where there are no incremental reports but just one or two. IN the other occasion you'll have to base yourself on the previous report uploaded.
+
+I'll give you access to a number of reports to show you how reports live throughout projects and how the incrementation works + the deviations from one project to another. I'll provide the MAIN TEMPLATE as well.
+
+Process
+PM uploads the documents .txt and .wordx
+
+2. Input files
+	- .txt file containing manual meeting notes or an ai transcript (leexy, teams premium, plaud, etc.) or both.
+	- .wordx file as the previous report
+
+3. Analyze and show the report proposal (with adapted metadata and incrementation of report number + changed dates and issue date) under an online word file viewer to modify directly in the document. The metadat has to be fixed and modified in seperate inputs but the content proposed (new points and adapted points) need to be adaptable in the online word viewer.
+
+4. Download report in .wordx format.
+
+Final goal
+The final goal of this v1 is to have a ready to use online tool for any PM of Immo-Pro. Create a BMAD methodology for the creation of this project.
+To connect to the platform each PM will have the link and will need to write their email adress. If this email is included in the list of adresses that are approved then they will have acces to the tool.
+
+Extra notes:
+- I want you to integrate in the tool an analysis loop (via python code or ai) of the report to make sure the output is qualitative and respond to a specific number of criteria.
+- I'd like to add also a prompt modifier for the user to give feedback on the output for you to adapt and rerun the script.

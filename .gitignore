@@ -1,9 +1,21 @@
-input/
-output/
-*.docx
+# Build artifacts & caches
 __pycache__/
+*.pyc
+node_modules/
+.next/
+dist/
+build/
+
+# Secrets
 .env
+.env.*
 .streamlit/secrets.toml
 
-# Ignore transcript files but not requirements.txt
-*.transcript.txt
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

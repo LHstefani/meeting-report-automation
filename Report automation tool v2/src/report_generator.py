@@ -119,14 +119,13 @@ def update_metadata(doc, new_meeting_number, new_date, new_distribution_date=Non
             break
 
     # Update date in cell that contains DD/MM/YYYY
+    # Use search instead of match to handle "Du DD/MM/YYYY" (CORUM format)
     for cell in row1.cells:
         cell_text = cell.text.strip()
-        if re.match(r'\d{2}/\d{2}/\d{4}', cell_text):
-            for para in cell.paragraphs:
-                if para.runs:
-                    para.runs[0].text = new_date
-                    for r in para.runs[1:]:
-                        r.text = ''
+        if re.search(r'\d{2}/\d{2}/\d{4}', cell_text):
+            _update_cell_text_preserve_format(
+                cell, r'\d{2}/\d{2}/\d{4}', new_date
+            )
             break
 
     # Row 2: Location (usually doesn't change, skip)
@@ -415,13 +414,33 @@ def _set_tc_paragraphs(tc, lines, bold=False):
 
 
 def find_section_table(doc, section_name):
-    """Find the table corresponding to a section name."""
+    """Find the table corresponding to a section name.
+
+    Matching strategy:
+    1. Exact section name match in header text
+    2. Fallback: any table with subject-type headers (N°, Sujet, Subject)
+    """
+    # First pass: exact match
     for table in doc.tables:
         if len(table.rows) < 2:
             continue
         header_text = ' '.join(c.text for c in table.rows[0].cells)
         if section_name.lower() in header_text.lower():
             return table
+
+    # Second pass: find any subject-type table (for single-table formats like CORUM)
+    for table in doc.tables:
+        if len(table.rows) < 1:
+            continue
+        header_text = ' '.join(c.text.lower() for c in table.rows[0].cells)
+        is_subject = (
+            'subject' in header_text or 'sujet' in header_text
+            or 'n°' in header_text or 'n\u00b0' in header_text
+            or re.search(r'd\d+\s*[-–]', header_text)
+        )
+        if is_subject:
+            return table
+
     return None
 
 

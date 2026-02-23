@@ -1,12 +1,20 @@
 """
-Leexi Transcript Cleaner - Parses and cleans meeting transcripts.
+Meeting Transcript Cleaner - Parses and cleans meeting transcripts.
 
-Processes Leexi-generated .txt transcripts:
+Supports two formats:
+1. Leexi format: Speaker turns with timestamps ("Name at MM:SS - MM:SS")
+2. Plain text: Free-flowing transcript without speaker labels (e.g. workshop notes)
+
+Processing steps (Leexi):
 - Parses speaker turns with timestamps
 - Removes noise: garbled text, "Thank you" spam, very short filler turns
 - Normalizes speaker names
 - Merges consecutive turns from same speaker
-- Outputs clean structured transcript
+
+Processing steps (Plain text):
+- Parses optional header (title, attendance)
+- Splits into paragraphs
+- Passes through meeting notes/agenda if present at end
 """
 
 import re
@@ -223,13 +231,162 @@ def extract_speaker_names(turns):
     return speakers
 
 
+def is_leexi_format(text):
+    """Detect if the transcript is in Leexi format (speaker + timestamp lines).
+
+    Returns True if at least 3 speaker pattern lines found, indicating Leexi format.
+    """
+    matches = SPEAKER_PATTERN.findall(text)
+    return len(matches) >= 3
+
+
+def parse_plain_transcript(text):
+    """Parse a plain text transcript (no speaker labels/timestamps).
+
+    Extracts:
+    - Header info (title line, attendance if present)
+    - Body paragraphs (splitting on blank lines)
+    - Trailing meeting notes/agenda (if present)
+    """
+    lines = text.split('\n')
+
+    header_lines = []
+    body_lines = []
+    notes_lines = []
+    in_notes = False
+
+    # Parse header: first non-empty lines until first blank line
+    header_done = False
+    for line in lines:
+        stripped = line.strip()
+
+        if not header_done:
+            if not stripped and header_lines:
+                header_done = True
+            elif stripped:
+                header_lines.append(stripped)
+            continue
+
+        # Detect meeting notes/agenda section at the end
+        # These typically start with "Agenda", "Notes:", "###" or similar markers
+        if not in_notes and re.match(
+            r'^(?:Agenda|Notes?|###|\*\*\*|---)', stripped, re.IGNORECASE
+        ):
+            in_notes = True
+
+        if in_notes:
+            notes_lines.append(line)
+        else:
+            body_lines.append(line)
+
+    # Split body into paragraphs (groups of non-empty lines separated by blank lines)
+    paragraphs = []
+    current_para = []
+    for line in body_lines:
+        if line.strip():
+            current_para.append(line.strip())
+        elif current_para:
+            paragraphs.append(' '.join(current_para))
+            current_para = []
+    if current_para:
+        paragraphs.append(' '.join(current_para))
+
+    # Parse attendance from header if present
+    attendance = {}
+    for hl in header_lines:
+        # Pattern: "Organization: Name1, Name2"
+        att_match = re.match(r'^(.+?):\s*(.+)$', hl)
+        if att_match and not re.match(r'^Transcript', hl, re.IGNORECASE):
+            org = att_match.group(1).strip()
+            names = [n.strip() for n in att_match.group(2).split(',')]
+            attendance[org] = names
+
+    # Extract title from first header line
+    title = header_lines[0] if header_lines else "Meeting Transcript"
+
+    return {
+        'title': title,
+        'attendance': attendance,
+        'paragraphs': paragraphs,
+        'notes': '\n'.join(notes_lines) if notes_lines else None,
+    }
+
+
+def clean_plain_transcript(text):
+    """Clean a plain text transcript (non-Leexi format).
+
+    Returns a structure compatible with the Leexi clean output.
+    """
+    parsed = parse_plain_transcript(text)
+
+    # Build pseudo-turns from paragraphs (one turn per paragraph, no speaker)
+    turns = []
+    for i, para in enumerate(parsed['paragraphs']):
+        if not para.strip():
+            continue
+        turns.append({
+            'speaker': 'Discussion',
+            'start': f'{i:02d}:00',
+            'end': f'{i:02d}:00',
+            'start_seconds': i * 60,
+            'end_seconds': i * 60,
+            'text': para,
+        })
+
+    return {
+        'turns': turns,
+        'speakers': {'Discussion': len(turns)},
+        'duration_seconds': 0,
+        'format': 'plain_text',
+        'title': parsed['title'],
+        'attendance': parsed['attendance'],
+        'notes': parsed['notes'],
+        'stats': {
+            'raw_turns': len(parsed['paragraphs']),
+            'noise_removed': 0,
+            'after_cleaning': len(turns),
+            'after_merging': len(turns),
+        }
+    }
+
+
+def format_plain_transcript(result):
+    """Format a cleaned plain text transcript for output."""
+    lines = []
+    lines.append(f"=== CLEANED TRANSCRIPT ===")
+    lines.append(f"Format: Plain text")
+    lines.append(f"Title: {result.get('title', 'Unknown')}")
+
+    attendance = result.get('attendance', {})
+    if attendance:
+        lines.append("Attendance:")
+        for org, names in attendance.items():
+            lines.append(f"  {org}: {', '.join(names)}")
+
+    lines.append(f"Paragraphs: {result['stats']['after_merging']}")
+    lines.append("")
+
+    for turn in result['turns']:
+        lines.append(turn['text'])
+        lines.append("")
+
+    notes = result.get('notes')
+    if notes:
+        lines.append("=== MEETING NOTES / AGENDA ===")
+        lines.append(notes)
+
+    return '\n'.join(lines)
+
+
 def clean_transcript(text, speaker_map=None):
-    """Full cleaning pipeline for a Leexi transcript.
+    """Full cleaning pipeline for a meeting transcript.
+
+    Auto-detects format (Leexi or plain text) and applies appropriate cleaning.
 
     Args:
         text: Raw transcript text
         speaker_map: Optional dict mapping speaker labels to real names
-                     e.g. {"Speaker 3": "Thibault Fayt"}
+                     e.g. {"Speaker 3": "Thibault Fayt"} (Leexi only)
 
     Returns:
         dict with:
@@ -237,8 +394,13 @@ def clean_transcript(text, speaker_map=None):
         - speakers: dict of speaker names and turn counts
         - duration_seconds: total duration
         - stats: cleaning statistics
+        - format: 'leexi' or 'plain_text'
     """
-    # Step 1: Parse raw turns
+    # Auto-detect format
+    if not is_leexi_format(text):
+        return clean_plain_transcript(text)
+
+    # Step 1: Parse raw turns (Leexi format)
     raw_turns = parse_transcript(text)
     total_raw = len(raw_turns)
 
@@ -274,6 +436,7 @@ def clean_transcript(text, speaker_map=None):
         'turns': merged_turns,
         'speakers': speakers,
         'duration_seconds': duration,
+        'format': 'leexi',
         'stats': {
             'raw_turns': total_raw,
             'noise_removed': noise_count,
@@ -284,7 +447,13 @@ def clean_transcript(text, speaker_map=None):
 
 
 def format_clean_transcript(result):
-    """Format cleaned transcript for output as readable text."""
+    """Format cleaned transcript for output as readable text.
+
+    Auto-dispatches between Leexi and plain text formats.
+    """
+    if result.get('format') == 'plain_text':
+        return format_plain_transcript(result)
+
     lines = []
     lines.append(f"=== CLEANED TRANSCRIPT ===")
     lines.append(f"Duration: {format_timestamp(result['duration_seconds'])}")

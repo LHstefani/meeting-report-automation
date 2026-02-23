@@ -1,7 +1,7 @@
 """
 Meeting Report Parser - Extracts structured data from .docx meeting reports.
 
-Parses Penta-style meeting reports into JSON with:
+Parses meeting reports (Penta and CORUM formats) into JSON with:
 - Metadata (meeting number, date, location, distribution, next meeting)
 - Attendance matrix
 - Info exchange table
@@ -245,12 +245,15 @@ def parse_subject_table(table):
                 match = re.search(r'Objet\s*[–\-]\s*(.+)', text)
             if not match:
                 match = re.search(r'D\d+\s*[-–]\s*(.+)', text)
+            if not match:
+                # CORUM format: "Sujet > Category" or "Sujet > Administratif"
+                match = re.search(r'Sujet\s*>\s*(.+)', text)
             if match:
                 section_name = match.group(1).strip()
                 break
 
     if section_name is None:
-        section_name = "Unknown"
+        section_name = "General"
 
     col_map = _detect_column_map(table, header_row_idx)
 
@@ -478,6 +481,9 @@ def classify_tables(doc):
         elif 'planning' in header_text and len(table.columns) == 1:
             classified.append((ti, 'planning', table))
         elif 'n°' in header_text or 'n\u00b0' in header_text or 'n�' in header_text:
+            classified.append((ti, 'subject', table))
+        elif 'sujet' in header_text:
+            # CORUM format: table header contains "Sujet"
             classified.append((ti, 'subject', table))
         elif re.search(r'd\d+\s*[-–]', header_text):
             # FR variant: "D1 - Partie Architecture / Sécurité"

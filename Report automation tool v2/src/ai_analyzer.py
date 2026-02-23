@@ -14,7 +14,7 @@ import anthropic
 MODEL = "claude-sonnet-4-20250514"
 MAX_TRANSCRIPT_CHARS = 100_000
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT_UPDATE = """\
 You are a construction meeting minute analyst. Your task is to compare a new meeting \
 transcript against the previous meeting report and produce structured updates.
 
@@ -89,9 +89,90 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this structur
 }
 """
 
+SYSTEM_PROMPT_NEW_REPORT = """\
+You are a construction meeting minute analyst. Your task is to create the FIRST meeting \
+report from a transcript. The previous report is a blank template (N°0) with no existing \
+points — you must generate ALL content from scratch.
+
+## Input
+You will receive:
+1. **Report Template** (JSON): the structure of the blank report template, including \
+metadata, section names, and empty tables.
+2. **Meeting Transcript** (text): the transcript of the meeting (may be a workshop, \
+technical meeting, or site visit discussion).
+
+## Task
+Analyze the transcript and create a complete set of discussion points:
+
+### 1. Point Updates (`point_updates`)
+Leave this EMPTY — there are no existing points to update.
+
+### 2. New Points (`new_points`)
+Create numbered points for ALL significant topics discussed. For each:
+- `section`: use the section name from the template (e.g. "Administratif", "General")
+- `number`: sequential numbering as "01.01", "01.02", "01.03", etc.
+- `title`: short descriptive title (2-5 words, in the report language)
+- `subject_lines`: list of lines summarizing what was discussed (2-6 concise lines per point)
+- `for_whom`: who is responsible (use organization abbreviations: "MO" for owner/client, \
+"MOD" for AMO/project manager, "BE" for engineering consultancy, "ARCH" for architect, \
+or specific names/organizations from the transcript)
+- `due`: due date, status, or "En cours" / "Ongoing" if applicable
+
+### 3. Info Exchange (`info_exchange`)
+List of action items and information requests identified in the transcript:
+- Each item: `{"from_whom": str, "status": str, "content": str, "due_date": str}`
+- Status should be "Open", "En cours", "A transmettre", etc.
+
+### 4. Planning (`planning`)
+Key milestones and schedule items mentioned:
+- Each item: `{"content": str, "is_new": true}`
+- All items are new since this is the first report
+
+### 5. Metadata
+- `meeting_number`: 1
+- `date`: date of the meeting (extract from transcript header if available, else null)
+- `distribution_date`: null
+- `next_meeting`: next meeting info if discussed, or null
+
+## Rules
+- Use the SAME LANGUAGE as the report template (if template is in French, write in French; \
+if English, write in English)
+- Keep points concise and factual — summarize decisions, observations, and action items
+- Group related topics into single points (don't create a point for every sentence)
+- Aim for 8-20 meaningful points depending on meeting length
+- Extract concrete action items into info_exchange, not just into point subject_lines
+- If the transcript includes meeting notes or an agenda at the end, use them to help \
+structure the points but prioritize the actual discussion content
+- If the transcript is unclear or garbled in places, skip those parts
+
+## Output Format
+Return ONLY a valid JSON object (no markdown, no explanation) with this structure:
+{
+  "meeting_number": 1,
+  "date": <str or null>,
+  "distribution_date": null,
+  "next_meeting": <str or null>,
+  "point_updates": [],
+  "new_points": [...],
+  "info_exchange": [...],
+  "planning": [...]
+}
+"""
+
+
+def _is_template_report(parsed_report):
+    """Check if the report is a blank template (N0) with no existing points."""
+    total_points = sum(
+        len(s.get("points", []))
+        for s in parsed_report.get("sections", [])
+    )
+    return total_points == 0
+
 
 def _build_user_message(parsed_report, cleaned_text):
     """Build the user message with report JSON and transcript text."""
+    is_template = _is_template_report(parsed_report)
+
     # Summarize the report structure for the prompt
     report_summary = {
         "metadata": parsed_report.get("metadata", {}),
@@ -135,13 +216,15 @@ def _build_user_message(parsed_report, cleaned_text):
         transcript = transcript[:MAX_TRANSCRIPT_CHARS]
         transcript += "\n\n[... TRANSCRIPT TRUNCATED due to length ...]"
 
-    return f"""## Previous Meeting Report
+    report_label = "Report Template (N°0 - blank)" if is_template else "Previous Meeting Report"
+
+    return f"""## {report_label}
 
 ```json
 {report_json}
 ```
 
-## New Meeting Transcript
+## Meeting Transcript
 
 {transcript}
 """
@@ -258,14 +341,19 @@ def analyze_meeting(parsed_report, cleaned_text, api_key):
     client = anthropic.Anthropic(api_key=api_key)
     user_message = _build_user_message(parsed_report, cleaned_text)
 
+    # Select prompt based on whether this is a first report or an update
+    is_template = _is_template_report(parsed_report)
+    system_prompt = SYSTEM_PROMPT_NEW_REPORT if is_template else SYSTEM_PROMPT_UPDATE
+    max_tokens = 8192 if is_template else 4096  # First reports need more tokens
+
     response_text = None
     last_error = None
     for attempt in range(2):
         try:
             response = client.messages.create(
                 model=MODEL,
-                max_tokens=4096,
-                system=SYSTEM_PROMPT,
+                max_tokens=max_tokens,
+                system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
             )
 
